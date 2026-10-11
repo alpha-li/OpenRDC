@@ -1,0 +1,16 @@
+# Configuration for `flutter gen-l10n`, run automatically because pubspec.yaml
+# sets `generate: true`.
+#
+# The template is the Chinese ARB rather than the English one. Every language
+# Flutter ships falls back to the template for keys a translation is missing, so
+# making the template the language the application is actually written in means
+# a missing English string degrades to the correct Chinese one rather than to
+# the rather less helpful "hello world".
+arb-dir: lib/l10n
+template-arb-file: app_zh.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+# Generated into lib/ rather than a synthetic package, so the code can be
+# read and reviewed like everything else.
+output-dir: lib/l10n/generated
+nullable-getter: false

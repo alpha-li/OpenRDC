@@ -1,0 +1,22 @@
+# Regenerates lib/rdc_bridge_bindings_generated.dart from the public C ABI.
+#
+#   dart run ffigen --config ffigen.yaml
+#
+# This requires LLVM/libclang on PATH. The bindings currently shipped in
+# lib/rdc_bridge.dart are hand-written against the same header, so the package
+# builds without libclang; treat this config as the source of truth for the
+# generated alternative, not as a required build step.
+name: RdcBridgeBindings
+description: |
+  Bindings for `src/rdc_api.h`.
+
+  Regenerate bindings with `dart run ffigen --config ffigen.yaml`.
+output: 'lib/rdc_bridge_bindings_generated.dart'
+headers:
+  entry-points:
+    - 'src/rdc_api.h'
+  include-directives:
+    - 'src/rdc_api.h'
+comments:
+  style: any
+  length: full
