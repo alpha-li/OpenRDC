@@ -7,7 +7,9 @@ import 'app.dart';
 /// Command-line switches, all optional.
 ///
 ///   `--diagnostics`          native bridge self-check instead of the UI
-///   `--connect host[:port]`  open a session immediately, skipping the UI
+///   `--connect host[:port]`  open a session immediately, skipping the UI.
+///                            A session that fails ends the process with a
+///                            non-zero code, there being no UI to fall back to
 ///   `--user name`            user name for `--connect` (may be `DOMAIN\user`)
 ///   `--domain name`          domain for `--connect`
 ///   `--fullscreen`           start the session full screen
@@ -17,7 +19,16 @@ import 'app.dart';
 /// variable rather than an argument, so it does not appear in the process list
 /// where any other process could read it.
 void main(List<String> args) {
-  runApp(OpenRdcApp(startup: _parseStartup(args)));
+  runApp(
+    OpenRdcApp(
+      startup: _parseStartup(args),
+      // Only the `--connect` launch has a use for this, and only when it fails:
+      // that page is the application's root, so there is no connection centre
+      // standing by to return to. Non-zero, so a script driving `--connect` can
+      // tell a failed session from a finished one.
+      onExit: () => exit(1),
+    ),
+  );
 }
 
 StartupMode _parseStartup(List<String> args) {

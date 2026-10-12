@@ -239,6 +239,15 @@ class RdpSession {
   std::atomic<bool> running_{false};
   std::atomic<bool> stop_requested_{false};
 
+  /// Whether this connection ever reached the desktop.
+  ///
+  /// A connection that fails is torn down by FreeRDP from inside the failed
+  /// connect, which raises the post-disconnect callback before the bridge has
+  /// been able to report why. Reporting a disconnection there would put it ahead
+  /// of the error that explains it, and a caller reacting to the disconnection
+  /// would have nothing to go on.
+  std::atomic<bool> connected_{false};
+
   /// Set on the worker thread, read by Disconnect(). `rdpContext` is opaque
   /// here so the header stays free of FreeRDP includes.
   std::atomic<void*> context_{nullptr};

@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openrdc/data/storage_paths.dart';
 import 'package:openrdc/data/thumbnail_store.dart';
@@ -12,6 +12,7 @@ import 'package:openrdc/engine/rdc_engine.dart';
 import 'package:openrdc/features/session/desktop_surface.dart';
 import 'package:openrdc/features/session/session_page.dart';
 import 'package:openrdc/models/pc_connection.dart';
+import 'package:rdc_bridge/rdc_bridge.dart' as bridge;
 
 import '../support/test_app.dart';
 
@@ -403,6 +404,327 @@ void main() {
     expect(find.byType(RawImage), findsOneWidget);
     expect(desktopCursor(tester), SystemMouseCursors.none);
   });
+
+  /// Leaving a session that ended, rather than parking the user on it.
+  ///
+  /// Mounted as a pushed route -- the way the connection centre opens a session
+  /// -- so the test can see what the page hands back on its way out. The
+  /// `pumpSession` above mounts it as the root, where a pop does nothing at all.
+  group('a session that ends', () {
+    const certificate = RdcCertificate(
+      host: 'pc.example.com',
+      port: 3389,
+      commonName: 'pc',
+      subject: 'CN=pc',
+      issuer: 'CN=pc',
+      fingerprint: 'AA:BB:CC',
+      changed: false,
+      nameMismatch: false,
+      oldFingerprint: '',
+    );
+
+    late List<RdcSessionFailure?> popped;
+
+    PcConnection connection() => PcConnection(
+      id: 'pc',
+      hostname: 'pc.example.com',
+      display: const PcDisplaySettings(updateResolutionOnResize: false),
+    );
+
+    /// Opens the session over a page that records what it returns.
+    Future<void> pumpPushed(
+      WidgetTester tester, {
+      VoidCallback? onClose,
+    }) async {
+      popped = <RdcSessionFailure?>[];
+      await tester.pumpWidget(
+        testApp(
+          home: Builder(
+            builder: (context) => GestureDetector(
+              onTap: () async {
+                popped.add(
+                  await Navigator.of(context).push<RdcSessionFailure>(
+                    MaterialPageRoute(
+                      builder: (_) => SessionPage(
+                        connection: connection(),
+                        engine: engine,
+                        onClose: onClose,
+                      ),
+                    ),
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    /// Lets a route change finish without waiting for animations to stop.
+    ///
+    /// `pumpAndSettle` is unusable while a session is coming up: the connecting
+    /// overlay spins for as long as it is on screen, so there is never a frame
+    /// with nothing left to do. Long enough for the page transitions either way.
+    Future<void> advance(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// Opens the session as the application's root, the way `--connect` does.
+    Future<void> pumpRoot(
+      WidgetTester tester, {
+      required VoidCallback onClose,
+    }) async {
+      await tester.pumpWidget(
+        testApp(
+          home: SessionPage(
+            connection: connection(),
+            engine: engine,
+            onClose: onClose,
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    /// Picks an entry out of the connection bar's overflow menu.
+    Future<void> choose(
+      WidgetTester tester,
+      IconData icon,
+      String label,
+    ) async {
+      await revealBar(tester);
+      await tester.tap(find.byIcon(icon));
+      await advance(tester);
+      await tester.tap(find.text(label));
+      await advance(tester);
+    }
+
+    testWidgets('hands the failure back and returns to what opened it', (
+      tester,
+    ) async {
+      await pumpPushed(tester);
+
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+      await emitEvent(
+        tester,
+        const RdcErrorEvent(
+          code: bridge.RdcResult.errConnectFailed,
+          message: 'host unreachable',
+        ),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+
+      expect(popped, hasLength(1));
+      final failure = popped.single;
+      expect(failure, isNotNull);
+      expect(failure!.code, bridge.RdcResult.errConnectFailed);
+      expect(failure.detail, 'host unreachable');
+      expect(find.byType(SessionPage), findsNothing);
+      expect(find.text('open'), findsOneWidget);
+      // Asking to stop is what reaps the finished session on the native side;
+      // without it the next connection aborts the process rather than failing.
+      expect(engine.stops, 1);
+    });
+
+    testWidgets('returns after a session that had been up goes down', (
+      tester,
+    ) async {
+      await pumpPushed(tester);
+
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connected),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+
+      // Nothing was reported wrong, so there is nothing to announce.
+      expect(popped, hasLength(1));
+      expect(popped.single, isNull);
+      expect(find.byType(SessionPage), findsNothing);
+    });
+
+    testWidgets('a disconnect the user asked for leaves once and in silence', (
+      tester,
+    ) async {
+      await pumpPushed(tester);
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+
+      await choose(
+        tester,
+        FluentIcons.more_horizontal_24_regular,
+        '断开连接',
+      );
+
+      expect(popped, hasLength(1));
+      expect(popped.single, isNull);
+
+      // The engine reports the session it has just stopped going down; that
+      // must not read as a second departure.
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+
+      expect(popped, hasLength(1));
+      expect(find.text('open'), findsOneWidget);
+    });
+
+    testWidgets('a reconnect re-arms, and the stale disconnect is ignored', (
+      tester,
+    ) async {
+      await pumpPushed(tester);
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connected),
+      );
+
+      await choose(
+        tester,
+        FluentIcons.more_horizontal_24_regular,
+        '重新连接',
+      );
+
+      // The session that was just stopped reports itself down. The attempt that
+      // replaced it must not take that for its own failure.
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+      expect(popped, isEmpty);
+
+      // Once the new attempt reports itself connecting, a failure is its own.
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+
+      expect(popped, hasLength(1));
+    });
+
+    testWidgets('a failure under the certificate prompt still leaves', (
+      tester,
+    ) async {
+      await pumpPushed(tester);
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+      await emitEvent(tester, const RdcCertificateEvent(certificate));
+      await advance(tester);
+
+      expect(
+        find.text('无法验证远程计算机的身份。是否仍要连接？'),
+        findsOneWidget,
+      );
+
+      // The prompt times out or the connect fails behind it. Popping blindly
+      // would take the dialog instead of the page and strand the session.
+      await emitEvent(
+        tester,
+        const RdcErrorEvent(
+          code: bridge.RdcResult.errConnectFailed,
+          message: 'host unreachable',
+        ),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+
+      expect(popped, hasLength(1));
+      expect(popped.single!.code, bridge.RdcResult.errConnectFailed);
+      expect(find.byType(SessionPage), findsNothing);
+      expect(find.text('open'), findsOneWidget);
+    });
+
+    testWidgets('declining the certificate returns with nothing to announce', (
+      tester,
+    ) async {
+      await pumpPushed(tester);
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+      await emitEvent(tester, const RdcCertificateEvent(certificate));
+      await advance(tester);
+
+      await tester.tap(find.text('否'));
+      await advance(tester);
+
+      // Refusing fails the connect, exactly as an unreachable host does.
+      await emitEvent(
+        tester,
+        const RdcErrorEvent(
+          code: bridge.RdcResult.errTlsFailed,
+          message: 'tls',
+        ),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+
+      expect(popped, hasLength(1));
+      expect(popped.single, isNull);
+    });
+
+    testWidgets('the --connect root closes instead of popping', (tester) async {
+      var closes = 0;
+      await pumpRoot(tester, onClose: () => closes++);
+
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.connecting),
+      );
+      await emitEvent(
+        tester,
+        const RdcStatusEvent(RdcSessionStatus.disconnected),
+      );
+      await advance(tester);
+
+      expect(closes, 1);
+      // Nothing was popped: this page is the whole navigator.
+      expect(find.byType(SessionPage), findsOneWidget);
+      // Still asked to stop on the way out, even though the process is ending.
+      expect(engine.stops, 1);
+    });
+  });
 }
 
 /// A stand-in for the native engine that records what the page asks of it.
@@ -473,8 +795,15 @@ class _FakeEngine implements RdcEngine {
   @override
   int startTestPattern({required int width, required int height}) => 0;
 
+  /// How many times the page asked the session to stop.
+  ///
+  /// Leaving has to ask even for a session that has already ended on its own:
+  /// the native side has one session per process and cannot begin another until
+  /// the finished one has been reaped, and reaping is what `stop` does.
+  int stops = 0;
+
   @override
-  void stop() {}
+  void stop() => stops++;
 
   @override
   void sendMouse(int action, int x, int y, {int wheelDelta = 0}) {

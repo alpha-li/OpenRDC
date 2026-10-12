@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openrdc/engine/rdc_engine.dart';
 import 'package:openrdc/l10n/error_messages.dart';
 import 'package:openrdc/l10n/generated/app_localizations.dart';
 import 'package:rdc_bridge/rdc_bridge.dart' as bridge;
@@ -80,6 +81,68 @@ void main() {
         12345,
       ]) {
         expect(rdcErrorMessage(zh, code, fallback: sentinel), isNot(sentinel));
+      }
+    });
+  });
+
+  group('rdcSessionFailureMessage', () {
+    /// A failure carrying only a protocol code.
+    RdcSessionFailure fromCode(int code, {String detail = 'x'}) =>
+        (code: code, detail: detail, engineError: null);
+
+    test('words a protocol failure by its code', () {
+      expect(
+        rdcSessionFailureMessage(
+          zh,
+          fromCode(bridge.RdcResult.errConnectFailed),
+        ),
+        zh.errorConnectFailed,
+      );
+    });
+
+    test('keeps the engine description for a code it does not know', () {
+      // The description is English and developer-facing, but for a failure with
+      // no sentence of its own, showing it beats showing nothing.
+      expect(
+        rdcSessionFailureMessage(
+          zh,
+          fromCode(12345, detail: 'something specific'),
+        ),
+        'something specific',
+      );
+    });
+
+    test('words a local engine state from its own table', () {
+      // These never came from the protocol, so there is no code to look up:
+      // the engine never got as far as one.
+      expect(
+        rdcSessionFailureMessage(
+          zh,
+          (code: 0, detail: '', engineError: RdcEngineError.unavailable),
+        ),
+        zh.errorEngineUnavailable,
+      );
+      expect(
+        rdcSessionFailureMessage(
+          zh,
+          (code: 0, detail: '', engineError: RdcEngineError.disposed),
+        ),
+        zh.errorEngineDisposed,
+      );
+    });
+
+    test('agrees with the table it delegates to', () {
+      // The session page and the connection centre report the same failure by
+      // different routes; this is what keeps the two from drifting apart.
+      for (final code in [
+        bridge.RdcResult.errConnectFailed,
+        bridge.RdcResult.errTlsFailed,
+        bridge.RdcResult.errAuthFailed,
+      ]) {
+        expect(
+          rdcSessionFailureMessage(zh, fromCode(code)),
+          rdcErrorMessage(zh, code, fallback: 'x'),
+        );
       }
     });
   });

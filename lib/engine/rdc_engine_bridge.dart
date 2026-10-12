@@ -223,6 +223,12 @@ class RdcBridgeEngine implements RdcEngine {
     _disposed = true;
     if (_available) {
       _bridge.stopTestPattern();
+      // The session too, not only the test pattern: a page can be torn down
+      // without ever having asked to stop, and a worker that finished on its own
+      // stays unjoined until somebody reaps it -- which is what makes the *next*
+      // connection abort the process. Before the sink is cleared, so the reap
+      // cannot be followed by a callback into a stream that is about to close.
+      _bridge.disconnect();
       _bridge.setEventSink(null);
     }
     await _events.close();

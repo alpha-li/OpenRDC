@@ -12,6 +12,7 @@ library;
 
 import 'package:rdc_bridge/rdc_bridge.dart' as bridge;
 
+import '../engine/rdc_engine.dart';
 import 'generated/app_localizations.dart';
 
 /// The sentence to show for [code], or null when the code is not one this table
@@ -45,5 +46,24 @@ String? rdcErrorMessage(
     bridge.RdcResult.errBadArgument => l10n.errorSessionStart,
 
     _ => null,
+  };
+}
+
+/// The sentence for a session that ended before it was usable.
+///
+/// Both ends of the session route call this -- the page that had the failure and
+/// the connection centre that reports it afterwards -- so the wording lives in
+/// one table rather than drifting apart between the two.
+String rdcSessionFailureMessage(
+  AppLocalizations l10n,
+  RdcSessionFailure failure,
+) {
+  return switch (failure.engineError) {
+    // A local engine state, not a protocol result: there is no code to look up.
+    RdcEngineError.unavailable => l10n.errorEngineUnavailable,
+    RdcEngineError.disposed => l10n.errorEngineDisposed,
+    null =>
+      rdcErrorMessage(l10n, failure.code, fallback: failure.detail) ??
+          failure.detail,
   };
 }

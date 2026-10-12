@@ -5,6 +5,7 @@ import 'data/credential_vault.dart';
 import 'data/preferences_store.dart';
 import 'data/storage_paths.dart';
 import 'engine/rdc_engine.dart';
+import 'l10n/error_messages.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'features/connection_center/connection_center_page.dart';
 import 'features/diagnostics/bridge_probe_page.dart';
@@ -62,6 +63,7 @@ class OpenRdcApp extends StatefulWidget {
     this.vault,
     this.preferences,
     this.startup = const ConnectionCentreStartup(),
+    this.onExit,
   });
 
   /// Injectable so tests can supply a temporary store.
@@ -75,6 +77,14 @@ class OpenRdcApp extends StatefulWidget {
   final PreferencesStore? preferences;
 
   final StartupMode startup;
+
+  /// Ends the process, which is how the `--connect` launch answers a session
+  /// that failed: it has no connection centre to fall back to.
+  ///
+  /// Injected rather than imported so this file keeps its distance from
+  /// `dart:io`, and so a test can watch the failure without ending the test
+  /// runner. Null on the ordinary launch, which never needs it.
+  final VoidCallback? onExit;
 
   @override
   State<OpenRdcApp> createState() => _OpenRdcAppState();
@@ -265,7 +275,7 @@ class _OpenRdcAppState extends State<OpenRdcApp> {
     if (!mounted) {
       return;
     }
-    await _navigatorKey.currentState?.push<void>(
+    final failure = await _navigatorKey.currentState?.push<RdcSessionFailure>(
       MaterialPageRoute(
         builder: (context) => SessionPage(
           connection: connection,
@@ -276,6 +286,24 @@ class _OpenRdcAppState extends State<OpenRdcApp> {
         ),
       ),
     );
+
+    // A session that failed says why once it is gone, so the message lands on
+    // the connection centre rather than on a session window that is leaving.
+    // A null result means the departure needs no explanation -- the user
+    // disconnected, or declined the certificate themselves.
+    //
+    // The context is taken after the await on purpose: it is the navigator's,
+    // which outlives the route just popped, unlike the session page's own.
+    final context = _navigatorKey.currentContext;
+    if (failure != null && context != null && context.mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            rdcSessionFailureMessage(AppLocalizations.of(context), failure),
+          ),
+        ),
+      );
+    }
   }
 
   /// Builds the ad-hoc connection used by `--connect`.
@@ -328,6 +356,10 @@ class _OpenRdcAppState extends State<OpenRdcApp> {
             password: password,
             domain: domain,
             ignoreCertificate: ignoreCertificate,
+            // This page is the application's root, so a failed session ends the
+            // process instead of returning to a connection centre that this
+            // launch never showed.
+            onClose: widget.onExit,
           ),
         ConnectionCentreStartup() =>
           _loading

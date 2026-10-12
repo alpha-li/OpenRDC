@@ -38,6 +38,7 @@ class SessionPage extends StatefulWidget {
     this.gateway,
     this.engine,
     this.thumbnails,
+    this.onClose,
   });
 
   final PcConnection connection;
@@ -65,6 +66,14 @@ class SessionPage extends StatefulWidget {
   /// same reason as [engine]: a test points it at a temporary directory.
   final ThumbnailStore? thumbnails;
 
+  /// How to leave when there is no page underneath to return to.
+  ///
+  /// Null means there is one: the connection centre pushed this page, so
+  /// leaving is a pop. The `--connect` launch makes this page the application's
+  /// root instead, where a pop would leave the navigator empty; that caller
+  /// passes a callback that ends the process.
+  final VoidCallback? onClose;
+
   @override
   State<SessionPage> createState() => _SessionPageState();
 }
@@ -87,7 +96,27 @@ class _SessionPageState extends State<SessionPage> {
   /// The last failure. Either a bridge error code with the engine's own
   /// description, or a local engine state with no code at all -- the two are
   /// different kinds of thing and are worded in different tables.
-  ({int code, String detail, RdcEngineError? engineError})? _error;
+  RdcSessionFailure? _error;
+
+  /// Whether this attempt has reported CONNECTING yet.
+  ///
+  /// A status left over from the session a reconnect has already replaced
+  /// arrives after the new attempt starts, and would otherwise read as the new
+  /// one ending. Reconnecting clears this, so only a CONNECTING belonging to the
+  /// current attempt re-arms the exit below.
+  bool _seenConnecting = false;
+
+  /// Whether the page has already decided to leave. A disconnect and a terminal
+  /// status can both arrive for the same session, and a dialog can be waiting on
+  /// top of the page; this is what keeps the departure to one.
+  bool _leaving = false;
+
+  /// Whether the user answered the certificate prompt with a refusal.
+  ///
+  /// The session ends just as it does for any other failure, but the user made
+  /// this happen on purpose and knows why, so there is nothing to announce.
+  bool _certificateDeclined = false;
+
   bool _barPinned = false;
   bool _barRevealed = false;
   Timer? _hideTimer;
@@ -192,6 +221,9 @@ class _SessionPageState extends State<SessionPage> {
       return;
     }
 
+    // Decided inside the switch, acted on outside it: leaving opens or closes
+    // routes, which is not state this page owns.
+    var leaving = false;
     setState(() {
       switch (event) {
         case RdcCertificateEvent():
@@ -200,6 +232,9 @@ class _SessionPageState extends State<SessionPage> {
           break;
         case RdcStatusEvent(:final status):
           _status = status;
+          if (status == RdcSessionStatus.connecting) {
+            _seenConnecting = true;
+          }
           // The session owns the keyboard while it is up, and gives it back the
           // moment it is not: the capture suspends the local input method, and a
           // window left without one cannot be typed into in Chinese at all.
@@ -221,6 +256,22 @@ class _SessionPageState extends State<SessionPage> {
             _enteredFullScreen = true;
             _engine.runWindowCommand(RdcWindowCommand.enterFullScreen);
           }
+          // A terminal status means the session is over and will not resume on
+          // its own: the engine's automatic reconnect runs inside FreeRDP and
+          // re-reports CONNECTED without ever reporting DISCONNECTED on the way,
+          // so reaching one of these really is the end. Staying would strand the
+          // user on a dead window whose only exit is the bar's disconnect
+          // button, which is what the connection centre is for instead.
+          //
+          // `_seenConnecting` is what keeps a status left over from the session
+          // a reconnect has already replaced from reading as this one ending;
+          // `isTerminal` is deliberately not used, because it counts idle.
+          if ((status == RdcSessionStatus.disconnected ||
+                  status == RdcSessionStatus.failed) &&
+              _seenConnecting &&
+              !_leaving) {
+            leaving = true;
+          }
         case RdcDesktopSizeEvent(:final size):
           _desktopSize = size;
         case RdcCursorEvent(:final cursor):
@@ -232,6 +283,10 @@ class _SessionPageState extends State<SessionPage> {
           _error = (code: code, detail: message, engineError: null);
       }
     });
+
+    if (leaving) {
+      _leaveWithFailure();
+    }
   }
 
   /// Puts text received from the remote machine onto the local clipboard.
@@ -295,6 +350,10 @@ class _SessionPageState extends State<SessionPage> {
       } on Object {
         decision = RdcCertificateDecision.reject;
       }
+      // Recorded before answering: the refusal fails the connect, and the
+      // terminal status that follows is what sends the page home. Without this
+      // the exit would report a security failure the user chose themselves.
+      _certificateDeclined = decision == RdcCertificateDecision.reject;
       _engine.respondToCertificate(decision);
     } finally {
       _certificatePromptOpen = false;
@@ -312,16 +371,15 @@ class _SessionPageState extends State<SessionPage> {
     if (error == null) {
       return l10n.sessionEngineUnavailable;
     }
-    return switch (error.engineError) {
-      RdcEngineError.unavailable => l10n.errorEngineUnavailable,
-      RdcEngineError.disposed => l10n.errorEngineDisposed,
-      null =>
-        rdcErrorMessage(l10n, error.code, fallback: error.detail) ??
-            error.detail,
-    };
+    // The wording lives with the connection centre's, which reports these same
+    // failures once this page is gone -- one table, so the two cannot drift.
+    return rdcSessionFailureMessage(l10n, error);
   }
 
   void _startSession() {
+    // A refusal belongs to the attempt whose prompt raised it; the next attempt
+    // answers for itself.
+    _certificateDeclined = false;
     final connection = widget.connection;
     try {
       _engine.connect(
@@ -368,10 +426,53 @@ class _SessionPageState extends State<SessionPage> {
   }
 
   void _disconnect() {
-    _engine.stop();
     if (mounted) {
-      Navigator.of(context).maybePop();
+      // Nothing to report: the user asked to stop, so they get no explanation.
+      _leave();
     }
+  }
+
+  /// Leaves because the session failed, handing the reason to the caller.
+  void _leaveWithFailure() {
+    // A refusal is the user's own doing and needs no announcing.
+    _leave(_certificateDeclined ? null : _error);
+  }
+
+  /// Takes this page off the screen, handing [failure] to whoever pushed it.
+  ///
+  /// One exit for every way out, so the question of which route to take is
+  /// answered in one place. A null [failure] means the departure needs no
+  /// explanation.
+  void _leave([RdcSessionFailure? failure]) {
+    if (_leaving) {
+      return;
+    }
+    _leaving = true;
+
+    // Asked for even when the session ended by itself, and before the page goes
+    // anywhere: the native side has one session per process and cannot begin
+    // another until the finished one has been reaped, and reaping is what this
+    // does. The status that brought the page here says the session has stopped
+    // being useful, not that its thread is gone.
+    _engine.stop();
+
+    final route = ModalRoute.of(context);
+    if (route == null || route.isFirst) {
+      // The `--connect` launch: this page is the application's root, so there is
+      // no connection centre underneath to go back to. `canPop` is not the test
+      // here -- it reports true while a dialog is up, which would pop the only
+      // route there is and leave an empty navigator behind it.
+      widget.onClose?.call();
+      return;
+    }
+
+    // The certificate prompt is pushed on this same navigator, above the page,
+    // so a bare pop would take the dialog instead -- and with `_leaving` already
+    // set, the page would then be stranded on a session that is over. Clear
+    // whatever is above first; this is a no-op when the page is already topmost.
+    final navigator = Navigator.of(context);
+    navigator.popUntil((candidate) => candidate == route);
+    navigator.pop<RdcSessionFailure?>(failure);
   }
 
   void _reconnect() {
@@ -379,6 +480,10 @@ class _SessionPageState extends State<SessionPage> {
     setState(() {
       _error = null;
       _status = RdcSessionStatus.idle;
+      // From here on, statuses belong to the new attempt. Without this, the
+      // DISCONNECTED still on its way from the session just stopped would read
+      // as this attempt having failed before it ever reported connecting.
+      _seenConnecting = false;
     });
     _startSession();
   }

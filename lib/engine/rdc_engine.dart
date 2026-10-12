@@ -274,6 +274,18 @@ class RdcErrorEvent extends RdcEngineEvent {
   String toString() => 'RdcErrorEvent($code, "$message")';
 }
 
+/// Why a session ended, as it crosses a route boundary.
+///
+/// A code and a kind, never a sentence: the layer that shows it chooses the
+/// words, which is what keeps a failure from arriving as a `String` with no way
+/// back to a translation. The shape is the one the session page already keeps
+/// for its own failure, so it hands it over without converting.
+typedef RdcSessionFailure = ({
+  int code,
+  String detail,
+  RdcEngineError? engineError,
+});
+
 /// Window operations the session can ask for. Values match `RDC_WINDOW_*` in
 /// `src/rdc_api.h`.
 abstract final class RdcWindowCommand {

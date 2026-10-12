@@ -284,20 +284,35 @@ int32_t RdpSession::Connect(const rdc_connect_params& params) {
     staged_redirect_all_drives_ = false;
   }
 
+  // Belt and braces with Disconnect(). The guard at the top of Connect() only
+  // asks whether a session is *running*, and a worker that finished on its own
+  // -- which is how every failed connection ends -- is not running yet is still
+  // a joinable std::thread. Assigning over one terminates the process; joining
+  // it first returns immediately.
+  if (worker_.joinable()) {
+    worker_.join();
+  }
+
   stop_requested_.store(false);
+  connected_.store(false);
   running_.store(true);
   worker_ = std::thread([this] { WorkerMain(); });
   return RDC_OK;
 }
 
 void RdpSession::Disconnect() {
-  if (!running_.load()) {
-    return;
-  }
+  // Deliberately not guarded on running_. The worker clears that flag itself,
+  // one statement before it reports DISCONNECTED, so a caller reacting to a
+  // connection that *failed* arrives too late to be told there is anything
+  // running -- while the thread is still sitting there unjoined. A joinable
+  // std::thread cannot be assigned over, and Start() assigns over this one, so
+  // returning early here aborts the process on the next connection instead of
+  // failing it. Joining a worker that has already finished costs nothing.
   stop_requested_.store(true);
   if (worker_.joinable()) {
     worker_.join();
   }
+  running_.store(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -585,6 +600,7 @@ bool RdpSession::OnPostConnect(void* instance_ptr) {
    * PostConnect again. */
   InstallCursorCapture(instance->context);
 
+  connected_.store(true);
   EmitState(RDC_STATE_CONNECTED, nullptr);
   return true;
 }
@@ -622,6 +638,16 @@ void RdpSession::RunSession() {
 }
 
 void RdpSession::OnPostDisconnect() {
+  // Only a session that was up disconnects in any sense the caller cares about.
+  // FreeRDP also raises this while tearing down a connection that never came
+  // up, and that one lands before the error explaining the failure -- so
+  // reporting it would announce the session ending first and the reason second,
+  // which is the wrong way round for anyone reacting to it. The worker reports
+  // DISCONNECTED once it has finished tearing down either way, so nothing is
+  // lost by staying quiet here.
+  if (!connected_.load()) {
+    return;
+  }
   EmitState(RDC_STATE_DISCONNECTED, nullptr);
 }
 
