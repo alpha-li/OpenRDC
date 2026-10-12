@@ -23,6 +23,13 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
+# Personal IDE settings are not shared. The one this repository used to carry
+# held an absolute path to a CMake source directory, which is wrong on every
+# machine but the one that wrote it -- and that machine had moved on too. The
+# rest of .vscode stays trackable, so launch.json and tasks.json can still be
+# committed if they ever need sharing.
+.vscode/settings.json
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id

@@ -1,0 +1,11 @@
+# This file has to survive a Windows checkout itself. core.autocrlf would
+# otherwise write it with CRLF, and a stray CR riding along at the end of a
+# pattern is a pattern that stops matching.
+.gitattributes text eol=lf
+
+# Flutter rewrites the plugin registration files on every build, and writes them
+# with LF. Without this, core.autocrlf expects CRLF in the working tree, so every
+# build leaves one of these looking modified while its bytes are identical to
+# what is committed -- noise that hides the one build that really did change
+# something, which is when a plugin has been added or removed.
+windows/flutter/generated_* text eol=lf
