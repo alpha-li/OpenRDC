@@ -51,9 +51,19 @@ const FlutterDesktopPixelBuffer* CopyPixelBuffer(size_t /*width*/, size_t /*heig
 
   const uint8_t* pixels = rdc_frame_acquire(&width, &height, &stride, &release_token);
   if (pixels == nullptr) {
-    // Nothing produced yet. Returning null makes the engine keep whatever it
-    // last had, which is the behaviour we want during connect.
-    return nullptr;
+    // Nothing has been produced for this session yet. Returning null would make
+    // the engine go on showing whatever it last had -- and on the second
+    // connection of a run that is the desktop of the machine connected to a
+    // moment ago, sitting there for the whole of the new one's connect. One
+    // transparent pixel instead clears the surface: the widget stretches
+    // whatever it is handed, so a single pixel covers the whole of it.
+    static const uint8_t kBlank[4] = {0, 0, 0, 0};
+    descriptor.buffer = kBlank;
+    descriptor.width = 1;
+    descriptor.height = 1;
+    descriptor.release_context = nullptr;
+    descriptor.release_callback = nullptr;
+    return &descriptor;
   }
 
   descriptor.buffer = pixels;

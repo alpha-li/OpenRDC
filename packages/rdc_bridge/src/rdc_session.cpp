@@ -293,6 +293,15 @@ int32_t RdpSession::Connect(const rdc_connect_params& params) {
     worker_.join();
   }
 
+  // The ring outlives any one session, and the presenter goes on showing what it
+  // last read whenever there is nothing to read. Left alone, that is the
+  // previous connection's desktop -- still on screen for the whole of this
+  // one's connect, and indistinguishable from the machine being connected to.
+  // Emptying it here and saying so is what makes "nothing yet" mean blank
+  // rather than out of date.
+  Ring().Reset(0, 0);
+  NotifyFrameReady();
+
   stop_requested_.store(false);
   connected_.store(false);
   running_.store(true);
