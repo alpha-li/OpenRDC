@@ -12,40 +12,64 @@ project(rdc_bridge_library VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The portable core. Nothing here may call a platform API or include a platform
+# header: what it asks of the platform is declared in platform/platform.h and
+# implemented per platform below.
 set(RDC_CORE_SOURCES
   "rdc_api.cpp"
   "rdc_api.h"
   "rdc_clipboard.h"
-  "rdc_credential.cpp"
   "rdc_core.cpp"
   "rdc_core.h"
   "rdc_cursor.h"
   "rdc_frame_ring.cpp"
   "rdc_frame_ring.h"
-  "rdc_keyboard.h"
   "rdc_session.h"
   "rdc_testpattern.cpp"
   "rdc_testpattern.h"
-  "rdc_window.cpp"
+  "platform/platform.h"
 )
 
-# The real protocol implementation needs FreeRDP. Where it is unavailable the
-# stub keeps the full ABI exported so the library still loads and callers get a
-# clear "built without protocol support" error instead of a link failure. This
-# is what keeps the other platforms a matter of adding a dependency rather than
-# restructuring.
+# --- Which platform answers platform.h -------------------------------------
+#
+# A separate axis from the protocol below, and deliberately not folded into it.
+# Window control, credential storage and keyboard capture have nothing to do
+# with whether FreeRDP is present -- the keyboard one in particular was chosen
+# by it before, which was wrong twice over: it is a platform implementation, and
+# it does not use FreeRDP at all.
+#
+# platform/null/ answers every one of them where a platform has not been
+# implemented, which is what keeps the ABI complete and the library loadable
+# before there is anything behind it.
+if(WIN32)
+  list(APPEND RDC_CORE_SOURCES
+    "platform/windows/keyboard.cpp"
+    "platform/windows/window.cpp"
+    "platform/windows/credential.cpp"
+  )
+else()
+  list(APPEND RDC_CORE_SOURCES
+    "platform/null/keyboard.cpp"
+    "platform/null/window.cpp"
+    "platform/null/credential.cpp"
+  )
+endif()
+
+# --- Whether the protocol below is real ------------------------------------
+#
+# The real implementation needs FreeRDP. Where it is unavailable the stub keeps
+# the full ABI exported so the library still loads and callers get a clear
+# "built without protocol support" error instead of a link failure.
 if(RDC_FREERDP_LIBRARIES)
   list(APPEND RDC_CORE_SOURCES
     "rdc_clipboard.cpp"
     "rdc_cursor.cpp"
-    "rdc_keyboard.cpp"
     "rdc_session.cpp"
   )
 else()
   list(APPEND RDC_CORE_SOURCES
     "rdc_clipboard_stub.cpp"
     "rdc_cursor_stub.cpp"
-    "rdc_keyboard_stub.cpp"
     "rdc_session_stub.cpp"
   )
 endif()

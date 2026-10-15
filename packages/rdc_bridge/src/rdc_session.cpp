@@ -391,6 +391,12 @@ void RdpSession::RunEventLoop() {
     return;
   }
 
+  // WaitForMultipleObjects rather than a wait of this file's own, and no
+  // platform branch around it: WinPR is the layer FreeRDP is already built on
+  // and provides it, along with the handles freerdp_get_event_handles fills in,
+  // on every platform. The only platform branch here is the provider path
+  // above, and that one is a Windows install-layout problem rather than a
+  // difference in how a program waits for work.
   HANDLE handles[64];
   while (!stop_requested_.load()) {
     // Input and clipboard announcements go out immediately before waiting, so

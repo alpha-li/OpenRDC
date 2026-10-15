@@ -9,7 +9,7 @@
 #include "rdc_core.h"
 #include "rdc_clipboard.h"
 #include "rdc_cursor.h"
-#include "rdc_keyboard.h"
+#include "platform/platform.h"
 #include "rdc_session.h"
 #include "rdc_testpattern.h"
 

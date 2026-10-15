@@ -45,19 +45,8 @@ const char* TempMessage(const char* format, ...);
 int64_t TextureId();
 void SetTextureId(int64_t id);
 
-// Window control, implemented in rdc_window.cpp. On platforms with no
-// implementation the state is simply always "not full screen" and the commands
-// do nothing.
-void SetMainWindow(void* native_window_handle);
-void RunWindowCommand(int32_t command);
-bool IsWindowFullScreen();
-
-// Credential storage, implemented in rdc_credential.cpp. On platforms without
-// a native secret store these report RDC_ERR_NOT_IMPLEMENTED.
-int32_t CredentialStore(const char* credential_id, const char* password);
-int32_t CredentialLoad(const char* credential_id, char* out, int32_t capacity);
-int32_t CredentialSize(const char* credential_id);
-int32_t CredentialDelete(const char* credential_id);
+// Window control and credential storage are asked of the platform rather than
+// done here: see platform/platform.h, which every platform implements.
 
 /// Whether diagnostic logging is on, i.e. the OPENRDC_LOG environment variable
 /// was set when the process started.
