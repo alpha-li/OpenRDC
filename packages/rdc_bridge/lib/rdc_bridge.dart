@@ -682,9 +682,25 @@ class RdcBridge {
 
   static RdcBridge? _instance;
 
+  /// The file this platform's build produces, or null where there is none.
+  ///
+  /// The name follows CMake's output rather than being assembled here: the
+  /// `rdc_bridge` target sets `OUTPUT_NAME "rdc_bridge"`, and the platform's
+  /// prefix and suffix are then whatever CMake gives them -- `.dll` and no
+  /// prefix on Windows, `lib...so` and `lib...dylib` elsewhere.
+  ///
+  /// macOS is named for the standalone library. If the plugin ends up packaged
+  /// as a framework there instead, this is the line that changes.
+  static String? get _libraryName => switch (Platform.operatingSystem) {
+    'windows' => 'rdc_bridge.dll',
+    'linux' => 'librdc_bridge.so',
+    'macos' => 'librdc_bridge.dylib',
+    _ => null,
+  };
+
   /// Whether the native library is loadable on this platform. False on web and
   /// anywhere the plugin is not built.
-  static bool get isSupported => Platform.isWindows;
+  static bool get isSupported => _libraryName != null;
 
   /// Loads the native library once. Throws [RdcUnavailableException] when it is
   /// missing, which in practice means the app was built without the plugin.
@@ -693,16 +709,17 @@ class RdcBridge {
     if (existing != null) {
       return existing;
     }
-    if (!isSupported) {
+    final name = _libraryName;
+    if (name == null) {
       throw RdcUnavailableException(
         '远程桌面引擎不支持当前平台 (${Platform.operatingSystem})',
       );
     }
     try {
-      final library = DynamicLibrary.open('rdc_bridge.dll');
+      final library = DynamicLibrary.open(name);
       return _instance = RdcBridge._(library);
     } on Object catch (error) {
-      throw RdcUnavailableException('无法加载 rdc_bridge.dll: $error');
+      throw RdcUnavailableException('无法加载 $name: $error');
     }
   }
 

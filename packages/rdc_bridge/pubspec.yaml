@@ -56,6 +56,13 @@ flutter:
         # CMake FFI plugin list, so ../windows is only added once.
         pluginClass: RdcBridgePlugin
         ffiPlugin: true
+      linux:
+        # Same two keys, for the same reasons as Windows: pluginClass generates
+        # the registration call, which is how the texture registrar is reached,
+        # and ffiPlugin makes the tool build ../src and copy the resulting
+        # library next to the runner.
+        pluginClass: RdcBridgePlugin
+        ffiPlugin: true
 
   # To add assets to your plugin package, add an assets section, like this:
   # assets:
