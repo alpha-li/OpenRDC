@@ -7,5 +7,7 @@
 # with LF. Without this, core.autocrlf expects CRLF in the working tree, so every
 # build leaves one of these looking modified while its bytes are identical to
 # what is committed -- noise that hides the one build that really did change
-# something, which is when a plugin has been added or removed.
-windows/flutter/generated_* text eol=lf
+# something, which is when a plugin has been added or removed. The pattern
+# covers every platform directory, so adding one does not mean remembering to
+# add its copy of this rule.
+*/flutter/generated_* text eol=lf

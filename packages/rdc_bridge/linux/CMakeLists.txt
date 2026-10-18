@@ -28,6 +28,17 @@ set(RDC_FREERDP_INCLUDE_DIRS ${FREERDP_INCLUDE_DIRS})
 
 # === Targets ===============================================================
 
+# The Linux platform implementations need the desktop's own libraries:
+# libsecret is the Secret Service client the credential store talks to, and GTK
+# is how the window commands reach the compositor -- the only route that works
+# under Wayland as well as X11.
+#
+# Handed to the core as a variable rather than linked from here: the core is a
+# directory of its own, and CMake will not let one directory add libraries to a
+# target built in another.
+pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
+set(RDC_PLATFORM_LIBRARIES PkgConfig::LIBSECRET PkgConfig::GTK)
+
 # The portable core, linked against the system FreeRDP.
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src" "${CMAKE_CURRENT_BINARY_DIR}/rdc_core")
 

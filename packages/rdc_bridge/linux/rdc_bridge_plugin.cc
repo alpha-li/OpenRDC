@@ -129,6 +129,16 @@ static void rdc_texture_init(RdcTexture* self) {
 
 extern "C" FLUTTER_PLUGIN_EXPORT void rdc_bridge_plugin_register_with_registrar(
     FlPluginRegistrar* registrar) {
+  // The window commands act on the application's own window, and only the
+  // plugin can reach it: Flutter hands the view to the plugin, not to the core.
+  GtkWidget* view = GTK_WIDGET(fl_plugin_registrar_get_view(registrar));
+  if (view != nullptr) {
+    GtkWidget* toplevel = gtk_widget_get_toplevel(view);
+    if (toplevel != nullptr && GTK_IS_WINDOW(toplevel)) {
+      rdc_set_main_window(toplevel);
+    }
+  }
+
   FlTextureRegistrar* texture_registrar =
       fl_plugin_registrar_get_texture_registrar(registrar);
   if (texture_registrar == nullptr) {

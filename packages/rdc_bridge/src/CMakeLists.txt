@@ -47,6 +47,12 @@ if(WIN32)
     "platform/windows/window.cpp"
     "platform/windows/credential.cpp"
   )
+elseif(UNIX AND NOT APPLE)
+  list(APPEND RDC_CORE_SOURCES
+    "platform/linux/keyboard.cpp"
+    "platform/linux/window.cpp"
+    "platform/linux/credential.cpp"
+  )
 else()
   list(APPEND RDC_CORE_SOURCES
     "platform/null/keyboard.cpp"
@@ -102,9 +108,17 @@ target_link_libraries(rdc_bridge PRIVATE Threads::Threads)
 
 if(WIN32)
   # The keyboard capture detaches the local input method with ImmAssociateContext
-  # (rdc_keyboard.cpp). imm32 is not among the libraries MSVC links by default,
-  # unlike user32, which is why the window code next door needs nothing here.
+  # (platform/windows/keyboard.cpp). imm32 is not among the libraries MSVC links
+  # by default, unlike user32, which is why the window code next door needs
+  # nothing here.
   target_link_libraries(rdc_bridge PRIVATE imm32)
+endif()
+
+# Libraries a platform implementation needs, supplied by the platform glue --
+# GTK for the window commands and libsecret for the credential store on Linux.
+# Passed in rather than found here so that each platform names its own.
+if(RDC_PLATFORM_LIBRARIES)
+  target_link_libraries(rdc_bridge PRIVATE ${RDC_PLATFORM_LIBRARIES})
 endif()
 
 # FreeRDP is supplied by the platform glue layer (see ../windows/CMakeLists.txt).
